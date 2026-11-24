@@ -277,7 +277,7 @@ body.no-anim .e-min,body.no-anim .oMin{animation:none}
        border-radius:5px;padding:6px 8px;margin-left:10px}
 .resActs{display:flex;flex-wrap:wrap;flex-shrink:0;margin-top:10px}
 .resActs .opt{width:auto;margin-right:10px;padding:8px 14px;font-size:13px}
-#resLog{flex-shrink:0;height:110px;overflow:auto;margin-top:10px;background:var(--panel2);border:1px solid var(--line);
+#resLog{flex-shrink:0;height:150px;overflow:auto;margin-top:10px;background:var(--panel2);border:1px solid var(--line);
         border-radius:6px;padding:10px;font-size:11.5px;line-height:1.55;color:var(--sub);white-space:pre-wrap}
 #resLog::-webkit-scrollbar{width:12px}
 #resLog::-webkit-scrollbar-track{background:var(--panel)}
@@ -396,7 +396,7 @@ body.no-anim .e-min,body.no-anim .oMin{animation:none}
 
   <div class="panel" id="resPanel">
     <div class="pHead"><div class="pTitle">站點解析 Stop Resolver</div><button class="pClose" id="resClose" aria-label="關閉">✕</button></div>
-    <div class="resNote">所有九巴月台（含 KT 編號）與城巴站均已內建經核實的對應，開機即用。若日後站點改動，可在此貼上新 stop ID 覆寫，或按「重新解析」自動配對；「還原預設」清除覆寫。以本站為終點的到達班次不會顯示。</div>
+    <div class="resNote">開機後系統會自動核對每個月台「實際回傳路線」與「設定路線」是否吻合；吻合度不足的月台（例如祥和苑北行）會自動重新配對，無需手動處理。亦可按「重新解析」強制以站名＋路線組合重配所有月台（內建預設亦會被修正），或手動貼上 stop ID 覆寫。以本站為終點的到達班次不會顯示。</div>
     <div id="resList"></div>
     <div class="resActs">
       <button class="opt" id="resRun">重新解析 Re-resolve</button>
@@ -416,7 +416,6 @@ body.no-anim .e-min,body.no-anim .oMin{animation:none}
 
 <script>
 'use strict';
-/* boot diagnostics: never fail silently */
 function showBootErr(msg){
   try{
     var b=document.getElementById('bootErr');
@@ -571,7 +570,6 @@ function rnum(r){var n=parseInt(r,10);if(isNaN(n))n=9999;if(r.charAt(0)==='N')n+
 function nname(s){return String(s||'').replace(/\s+/g,'').replace(/（/g,'(').replace(/）/g,')').toLowerCase();}
 function T(zh,en){return S.langCur==='en'?(en!==undefined?en:zh):zh;}
 function inDoc(e){return !!(e&&document.documentElement&&document.documentElement.contains(e));}
-/* flow marquee (guarded) */
 function flowEnsure(e){
   if(!e||!e.classList||!e.classList.contains('flow'))return null;
   var tr=e.firstChild;
@@ -617,7 +615,7 @@ function flowSet(e,text){
       if(S.anim){e.classList.add('mq');tr.style.animation='';tr.style.animationDuration=Math.max(6,(aw+60)/60)+'s';}
       else e.classList.add('clip');
     }
-  }catch(err){/* marquee is cosmetic; never break the board */}
+  }catch(err){}
 }
 function reflowVisible(){
   try{
@@ -629,7 +627,6 @@ function reflowVisible(){
   }catch(e){}
 }
 function setIfNotFlapping(e,t){if(!e)return;if(e.classList&&e.classList.contains('flapping'))return;flowSetText(e,t);}
-/* split-flap (guarded) */
 var FLAP_LAT='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/·';
 var FLAP_CJK='アィウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ・ー';
 var FLAPPEND=[];
@@ -809,6 +806,15 @@ function svcText(c){
   if(c.note)en+=' · Special trips';
   return T(zh,en);
 }
+/* live route-set of a platform from latest AGG (for self-validation) */
+function liveDice(p){
+  var ag=AGG[p.key];
+  if(!ag||!ag.length)return -1;
+  var set={};ag.forEach(function(e){set[e.route]=1;});
+  var inter=0;p.routes.forEach(function(r){if(set[r.route])inter++;});
+  var nk=Object.keys(set).length;
+  return (2*inter)/(p.routes.length+nk);
+}
 function resolve(force){
   if(S.resolving)return Promise.resolve();
   if(!force&&PLATS.every(function(p){return MAP[p.key];}))return Promise.resolve();
@@ -823,24 +829,48 @@ function resolve(force){
         var set={},n=0;((j2&&j2.data)||[]).forEach(function(it){if(it.route&&!set[it.route]){set[it.route]=1;n++;}});
         c.routes=set;c.n=n;return c;}).catch(function(){c.routes={};c.n=0;return c;});}));
   }).then(function(){
-    var used={};Object.keys(MAP).forEach(function(k){if(MAP[k])used[MAP[k]]=1;});
+    var used={};
     PLATS.forEach(function(p){
-      if(MAP[p.key]&&!force)return;
-      if(MAP[p.key]&&force&&DEFAULT_MAP[p.key]===MAP[p.key])return;
+      if(!force&&MAP[p.key])return;
       var want={},wn=p.routes.length;p.routes.forEach(function(r){want[r.route]=1;});
-      var best=null,bs=0;
-      CAND.forEach(function(c){
-        if(used[c.stop])return;
-        if(!p.stop.aliases.some(function(a){return nname(a)===nname(c.name_tc);}))return;
-        var inter=0;Object.keys(want).forEach(function(r){if(c.routes[r])inter++;});
-        var d=(2*inter)/(wn+(c.n||0));if(d>bs){bs=d;best=c;}});
-      if(best&&bs>=0.30){MAP[p.key]=best.stop;used[best.stop]=1;
-        olog('✓ '+p.stop.name+' '+p.stop.dir+' 月台 '+platLabel(p)+' → '+best.stop+' ('+Math.round(bs*100)+'%)');}
-      else if(!MAP[p.key])olog('✗ '+p.stop.name+' '+p.stop.dir+' 月台 '+platLabel(p)+' 未配對 ('+Math.round(bs*100)+'%)');
+      function diceOf(c){var inter=0;Object.keys(want).forEach(function(r){if(c.routes[r])inter++;});
+        return (2*inter)/(wn+(c.n||0));}
+      function nameOk(c){return p.stop.aliases.some(function(a){return nname(a)===nname(c.name_tc);});}
+      var best=null,bs=0,i;
+      for(i=0;i<CAND.length;i++){
+        var c=CAND[i];
+        if(used[c.stop]||!nameOk(c))continue;
+        var d=diceOf(c);if(d>bs){bs=d;best=c;}
+      }
+      var cur=null;
+      if(MAP[p.key])for(i=0;i<CAND.length;i++){if(CAND[i].stop===MAP[p.key]){cur=CAND[i];break;}}
+      var keepCur=cur&&nameOk(cur)&&diceOf(cur)>=0.5&&(!best||diceOf(cur)>=bs-0.05);
+      if(keepCur){used[cur.stop]=1;
+        olog('✓ 保留 '+p.stop.name+' '+p.stop.dir+' '+platLabel(p)+' → '+cur.stop+' ('+Math.round(diceOf(cur)*100)+'%)');}
+      else if(best&&bs>=0.30){MAP[p.key]=best.stop;used[best.stop]=1;
+        olog('✓ 配對 '+p.stop.name+' '+p.stop.dir+' '+platLabel(p)+' → '+best.stop+' ('+Math.round(bs*100)+'%)');}
+      else if(!MAP[p.key])olog('✗ '+p.stop.name+' '+p.stop.dir+' '+platLabel(p)+' 未配對 ('+Math.round(bs*100)+'%)');
+      else {used[MAP[p.key]]=1;olog('· 維持 '+p.stop.name+' '+p.stop.dir+' '+platLabel(p)+' → '+MAP[p.key]);}
     });
     saveMap();buildResList();
+    Object.keys(ROWS).forEach(function(k){ROWS[k].sig='';});
   }).catch(function(e){olog('站清單下載失敗：'+(e&&e.message||e));buildResList();})
    .then(function(){S.resolving=false;refreshEtas();});
+}
+/* after first data load, auto-fix any platform whose live route-set disagrees */
+function validateStops(){
+  if(S.validated)return;S.validated=true;
+  var bad=[];
+  PLATS.forEach(function(p){
+    var d=liveDice(p);
+    if(d>=0&&d<0.4)bad.push(p.key+'('+Math.round(d*100)+'%)');
+  });
+  if(bad.length){
+    olog('自動核對發現吻合度偏低：'+bad.join(', ')+' → 重新解析');
+    resolve(true);
+  }else{
+    olog('自動核對完成：所有已連結月台路線吻合正常。');
+  }
 }
 function buildResList(){
   var box=$('resList');clear(box);
@@ -850,7 +880,8 @@ function buildResList(){
     nm.appendChild(el('i','','月台 '+platLabel(p)+' · '+p.routes.length+' 條路線'+(DEFAULT_MAP[p.key]?' · 內建預設':'')));
     r.appendChild(nm);
     var id=MAP[p.key]||'';
-    r.appendChild(el('div','resId'+(id?' ok':' bad'),id||'未配對 Unresolved'));
+    var d=liveDice(p);
+    r.appendChild(el('div','resId'+(id?' ok':' bad'),(id||'未配對 Unresolved')+(d>=0?('　吻合 '+Math.round(d*100)+'%'):'')));
     var inp=document.createElement('input');inp.className='resIn';inp.value=id;
     inp.placeholder='九巴 stop ID';inp.setAttribute('data-p',p.key);r.appendChild(inp);
     box.appendChild(r);});
@@ -877,7 +908,7 @@ function qs(){var o={},s=location.search.replace(/^\?/,'');if(!s)return o;
   s.split('&').forEach(function(kv){var i=kv.indexOf('=');if(i<0)return;
     o[decodeURIComponent(kv.slice(0,i))]=decodeURIComponent(kv.slice(i+1).replace(/\+/g,' '));});return o;}
 var S={scale:1,fs:false,wake:null,guard:'init',audio:'off',loaded:false,lastEta:0,theme:'dark',anim:true,
-  open:'',errs:[],frameT:0,phases:[],pi:0,pT:0,resolving:false,boot:Date.now(),
+  open:'',errs:[],frameT:0,phases:[],pi:0,pT:0,resolving:false,validated:false,boot:Date.now(),
   langCur:'zh',langT:Date.now(),detailSig:'',
   wx:{temp:null,hum:null,icon:null},wxMsgs:[],warns:[]};
 var H={kmb:{ok:false,t:0,err:''},ctb:{ok:false,t:0,err:''},hko:{ok:false,t:0,err:''}};
@@ -906,7 +937,9 @@ function refreshEtas(){
     H.kmb.ok=okK>0;if(okK)H.kmb.t=Date.now();H.kmb.err=okK?'':eK;
     H.ctb.ok=okC>0;if(okC)H.ctb.t=Date.now();H.ctb.err=okC?'':eC;
     if(okK+okC>0){S.lastEta=Date.now();S.loaded=true;}
-    etaBusy=false;buildPhases();renderAll();});
+    etaBusy=false;buildPhases();renderAll();
+    setTimeout(validateStops,1200);
+  });
 }
 function termSetOf(p){
   if(p._ts)return p._ts;
@@ -1271,7 +1304,9 @@ function dbg(now){
   L.push('mode '+CFG.mode+(CFG.lock?(' lock='+STOPBY[CFG.lock].name):'')+'　sort '+CFG.sort+'　pending flaps '+FLAPPEND.length);
   L.push('screen '+window.innerWidth+'x'+window.innerHeight+' scale '+S.scale.toFixed(3)+'　fs '+(isFS()?'Y':'N')+'　guard '+S.guard+'　wake '+(S.wake?'Y':'N'));
   L.push('phase '+(S.pi+1)+'/'+S.phases.length+' '+(ph.type==='over'?'overview':(ph.type==='stop'?STOPS[ph.si].name+' p'+(ph.page+1)+'/'+ph.pages:'-'))+'　rows/page '+DP.per);
-  L.push('KMB linked '+resCount()+'/'+PLATS.length+'　CTB '+Object.keys(CTBM).map(function(k){return k+'='+CTBM[k];}).join(' '));
+  L.push('KMB linked '+resCount()+'/'+PLATS.length+'　validated '+S.validated);
+  PLATS.forEach(function(p){var d=liveDice(p);
+    if(d>=0&&d<0.4)L.push('  LOW MATCH '+p.stop.name+' '+p.stop.dir+' '+platLabel(p)+' '+MAP[p.key]+' dice='+Math.round(d*100)+'%');});
   ['kmb','ctb','hko'].forEach(function(k){var h=H[k];
     L.push(k.toUpperCase()+': '+(h.ok?'OK':'FAIL')+(h.t?(' @'+hhmm(h.t)):'')+(h.err?('  '+h.err):''));});
   if(S.errs.length){L.push('errors:');S.errs.slice(-6).forEach(function(e){L.push('  '+e);});}
